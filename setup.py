@@ -5,12 +5,27 @@
 # LICENSE file in the root directory of this source tree.
 
 import os
-from setuptools import setup, find_packages, Extension
+import subprocess
 import sys
+from setuptools import setup, find_packages, Extension
 
 
 if sys.version_info < (3, 6):
     sys.exit('Sorry, Python >= 3.6 is required for fairseq.')
+
+
+# source of truth for fairseq version
+version = '1.0.0a'
+version_path = os.path.join('fairseq', 'version.py')
+try:
+    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD']).decode('ascii').strip()
+    version += '+' + sha[:7]
+except Exception:
+    pass
+
+
+with open(version_path, 'w') as f:
+    f.write("__version__ = '{}'\n".format(version))
 
 
 with open('README.md') as f:
@@ -118,7 +133,7 @@ if 'clean' in sys.argv[1:]:
 def do_setup(package_data):
     setup(
         name='fairseq',
-        version='0.9.0',
+        version=version,
         description='Facebook AI Research Sequence-to-Sequence Toolkit',
         url='https://github.com/pytorch/fairseq',
         classifiers=[
