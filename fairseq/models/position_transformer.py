@@ -982,7 +982,7 @@ def Linear(in_features, out_features, bias=True):
     return m
 
 
-@register_model_architecture("positional_transformer", "positional_transformer")
+@register_model_architecture("positional_transformer", "transformer")
 def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
