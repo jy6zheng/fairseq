@@ -151,6 +151,10 @@ def collate(
 
             batch["alignments"] = alignments
             batch["align_weights"] = align_weights
+            # Want to find maximum target position so the position table in the transformer # positions = maximum target
+            # position
+            max_target_position = torch.max(alignments[:, :, -1])
+            batch["net_input"]["max_target_position"] = max_target_position
 
     if samples[0].get("constraints", None) is not None:
         # Collate the packed constraints across the samples, padding to
@@ -159,7 +163,7 @@ def collate(
         max_len = max(lens)
         constraints = torch.zeros((len(samples), max(lens))).long()
         for i, sample in enumerate(samples):
-            constraints[i, 0 : lens[i]] = samples[i].get("constraints")
+            constraints[i, 0: lens[i]] = samples[i].get("constraints")
         batch["constraints"] = constraints
 
     return batch
