@@ -89,6 +89,7 @@ def collate(
             else None,
         )
         target = target.index_select(0, sort_order)
+        _, max_target_position = target.shape
         tgt_lengths = torch.LongTensor(
             [s["target"].ne(pad_idx).long().sum() for s in samples]
         ).index_select(0, sort_order)
@@ -117,6 +118,7 @@ def collate(
         "net_input": {
             "src_tokens": src_tokens,
             "src_lengths": src_lengths,
+            "max_target_position": max_target_position,
         },
         "target": target,
     }
@@ -151,10 +153,6 @@ def collate(
 
             batch["alignments"] = alignments
             batch["align_weights"] = align_weights
-            # Want to find maximum target position so the position table in the transformer # positions = maximum target
-            # position
-            max_target_position = torch.max(alignments[:, :, -1])
-            batch["net_input"]["max_target_position"] = max_target_position
 
     if samples[0].get("constraints", None) is not None:
         # Collate the packed constraints across the samples, padding to

@@ -32,7 +32,7 @@ DEFAULT_MAX_SOURCE_POSITIONS = 101
 DEFAULT_MAX_TARGET_POSITIONS = 101
 
 
-@register_model("position_transformer")
+# @register_model("position_transformer")
 class PositionTransformerModel(FairseqEncoderDecoderModel):
     """
     Transformer model from `"Attention Is All You Need" (Vaswani, et al, 2017)
@@ -391,9 +391,7 @@ class PositionTransformerEncoder(FairseqEncoder):
             self.layer_norm = LayerNorm(embed_dim)
         else:
             self.layer_norm = None
-        # defining positional_encoding, if it is false, there is no absolute position encoding
-        self.positional_encoding = getattr(args, "positional_encoding", False)
-        self.positional_layers = getattr(args, "positional_layers")
+        self.positional_encoding = args.positional_encoding
 
     # override the torchscript compatible version of forward so we can add the additional argument for
     # max_target_position
@@ -982,7 +980,7 @@ def Linear(in_features, out_features, bias=True):
     return m
 
 
-@register_model_architecture("positional_transformer", "transformer")
+# @register_model_architecture("position_transformer")
 def base_architecture(args):
     args.encoder_embed_path = getattr(args, "encoder_embed_path", None)
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
@@ -1026,10 +1024,10 @@ def base_architecture(args):
     args.layernorm_embedding = getattr(args, "layernorm_embedding", False)
     args.tie_adaptive_weights = getattr(args, "tie_adaptive_weights", False)
     args.positional_encoding = getattr(args, "positional_encoding", False)
-    args.positional_encoding = getattr(args, "positional_layers", [1, 6])
+    args.positional_layers = getattr(args, "positional_layers", [1, 6])
 
 
-@register_model_architecture("positional_transformer", "positional_transformer_iwslt_de_en")
+# @register_model_architecture("position_transformer", "positional_transformer_iwslt_de_en")
 def transformer_iwslt_de_en(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 512)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 1024)
@@ -1042,13 +1040,13 @@ def transformer_iwslt_de_en(args):
     base_architecture(args)
 
 
-@register_model_architecture("positional_transformer", "positional_transformer_wmt_en_de")
+# @register_model_architecture("position_transformer", "positional_transformer_wmt_en_de")
 def transformer_wmt_en_de(args):
     base_architecture(args)
 
 
 # parameters used in the "Attention Is All You Need" paper (Vaswani et al., 2017)
-@register_model_architecture("positional_transformer", "positional_transformer_vaswani_wmt_en_de_big")
+# @register_model_architecture("position_transformer", "positional_transformer_vaswani_wmt_en_de_big")
 def transformer_vaswani_wmt_en_de_big(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 1024)
     args.encoder_ffn_embed_dim = getattr(args, "encoder_ffn_embed_dim", 4096)
@@ -1061,20 +1059,20 @@ def transformer_vaswani_wmt_en_de_big(args):
     base_architecture(args)
 
 
-@register_model_architecture("positional_transformer", "positional_transformer_vaswani_wmt_en_fr_big")
+# @register_model_architecture("position_transformer", "positional_transformer_vaswani_wmt_en_fr_big")
 def transformer_vaswani_wmt_en_fr_big(args):
     args.dropout = getattr(args, "dropout", 0.1)
     transformer_vaswani_wmt_en_de_big(args)
 
 
-@register_model_architecture("positional_transformer", "positional_transformer_wmt_en_de_big")
+# @register_model_architecture("position_transformer", "positional_transformer_wmt_en_de_big")
 def transformer_wmt_en_de_big(args):
     args.attention_dropout = getattr(args, "attention_dropout", 0.1)
     transformer_vaswani_wmt_en_de_big(args)
 
 
 # default parameters used in tensor2tensor implementation
-@register_model_architecture("positional_transformer", "positional_transformer_wmt_en_de_big_t2t")
+# @register_model_architecture("position_transformer", "positional_transformer_wmt_en_de_big_t2t")
 def transformer_wmt_en_de_big_t2t(args):
     args.encoder_normalize_before = getattr(args, "encoder_normalize_before", True)
     args.decoder_normalize_before = getattr(args, "decoder_normalize_before", True)

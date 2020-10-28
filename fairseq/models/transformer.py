@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from fairseq import utils
 from fairseq.models import (
     FairseqEncoder,
@@ -259,6 +260,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
         features_only: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
+        max_target_position: Optional[int] = None,
+        position_layers: Optional[List[int]] = None,
     ):
         """
         Run the forward pass for an encoder-decoder model.
@@ -267,7 +270,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
         which are not supported by TorchScript.
         """
         encoder_out = self.encoder(
-            src_tokens, src_lengths=src_lengths, return_all_hiddens=return_all_hiddens
+            src_tokens, src_lengths=src_lengths, max_target_position=max_target_position, position_layers=position_layers, return_all_hiddens=return_all_hiddens
         )
         decoder_out = self.decoder(
             prev_output_tokens,
@@ -317,6 +320,14 @@ class TransformerEncoder(FairseqEncoder):
         embed_dim = embed_tokens.embedding_dim
         self.padding_idx = embed_tokens.padding_idx
         self.max_source_positions = args.max_source_positions
+
+        # creating constant positional encoding table with the max source positions
+        pe = torch.zeros(self.max_source_positions, embed_dim)
+        position = torch.arange(0, self.max_source_positions).unsqueeze(1)
+        div_term = torch.exp((torch.arange(0, embed_dim, 2, dtype=torch.float) * -(math.log(10000.0) / embed_dim)))
+        pe[:, 0::2] = torch.sin(position.float() * div_term)
+        pe[:, 1::2] = torch.cos(position.float() * div_term)
+        self.constant_positional_encoding = pe
 
         self.embed_tokens = embed_tokens
 
@@ -380,10 +391,28 @@ class TransformerEncoder(FairseqEncoder):
             x = self.quant_noise(x)
         return x, embed
 
+    def position_attention(self, x, pos_table, sf_type):
+        # T x B x C -> B x T x C
+        x = x.transpose(0, 1)
+        dim = x.size(-1)
+        # pos_table : B x P x C -> B x C x P, scores: B x T (# words) x P (# positions)
+        scores = torch.matmul(x, pos_table.transpose(-2, -1)) / math.sqrt(dim)
+        if sf_type == 1:
+            pos_attention = F.softmax(scores, dim=-1)
+        else:
+            pos_attention = F.gumbel_softmax(scores, dim=-1)
+        # [B x T (words) x P (positions)] x [B x P(positions) x C] -> B x T x C
+        reordered_pos = torch.matmul(pos_attention, pos_table)
+        # B x T x C -> T x B x C
+        reordered_pos = reordered_pos.transpose(0, 1)
+        return reordered_pos, pos_attention
+
     def forward(
         self,
         src_tokens,
         src_lengths,
+        max_target_position: Optional[int] = None,
+        position_layers: Optional[List[int]] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
     ):
@@ -411,7 +440,15 @@ class TransformerEncoder(FairseqEncoder):
                   Only populated if *return_all_hiddens* is True.
         """
         x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
+        num_sentences, src_len, d = x.size()
 
+        # create position table of target positions (P x C ) where P stands for target positions
+        pos_table = self.constant_positional_encoding[:max_target_position]
+        # repeat position table for each of the sentences (B x P x C)
+        pos_table = pos_table.repeat(num_sentences, 1).view(num_sentences, max_target_position, -1)
+        num_layers = len(position_layers)
+        # stores position attention probabilities for each layer L x B x T x P
+        probability = torch.empty(num_layers, num_sentences, src_len, max_target_position)
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 
@@ -421,7 +458,10 @@ class TransformerEncoder(FairseqEncoder):
         encoder_states = [] if return_all_hiddens else None
 
         # encoder layers
-        for layer in self.layers:
+        for idx, layer in enumerate(self.layers):
+            if idx in position_layers:
+                x, pos_attention = self.position_attention(x, pos_table)
+                probability[idx] = pos_attention
             x = layer(x, encoder_padding_mask)
             if return_all_hiddens:
                 assert encoder_states is not None
@@ -437,7 +477,22 @@ class TransformerEncoder(FairseqEncoder):
             encoder_states=encoder_states,  # List[T x B x C]
             src_tokens=None,
             src_lengths=None,
-        )
+        ), probability
+
+    def forward_torchscript(self, net_input: Dict[str, Tensor]):
+        """A TorchScript-compatible version of forward.
+
+        Encoders which use additional arguments may want to override
+        this method for TorchScript compatibility.
+        """
+        if torch.jit.is_scripting():
+            return self.forward(
+                src_tokens=net_input["src_tokens"],
+                src_lengths=net_input["src_lengths"],
+                max_target_position=net_input["max_target_position"]
+            )
+        else:
+            return self.forward_non_torchscript(net_input)
 
     @torch.jit.export
     def reorder_encoder_out(self, encoder_out: EncoderOut, new_order):
