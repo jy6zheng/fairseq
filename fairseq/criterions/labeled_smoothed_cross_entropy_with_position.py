@@ -65,7 +65,7 @@ class LabelSmoothedCrossEntropyCriterionWithPosition(
             # B x T x P -> B x P x T
             layer = layer.transpose(1, 2)
             bsz, tgt_sz, src_sz = layer.shape
-            prob = layer.view(bsz * tgt_sz, src_sz)
+            prob = layer.reshape(bsz * tgt_sz, src_sz)
             align = sample["alignments"]
             align_weights = sample["align_weights"].float()
             if len(align) > 0:

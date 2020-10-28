@@ -255,12 +255,12 @@ class TransformerModel(FairseqEncoderDecoderModel):
         self,
         src_tokens,
         src_lengths,
+        max_target_position,
         prev_output_tokens,
         return_all_hiddens: bool = True,
         features_only: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
-        max_target_position: Optional[int] = None,
         position_layers: Optional[List[int]] = None,
     ):
         """
@@ -411,7 +411,7 @@ class TransformerEncoder(FairseqEncoder):
         self,
         src_tokens,
         src_lengths,
-        max_target_position: Optional[int] = None,
+        max_target_position,
         position_layers: Optional[List[int]] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
@@ -449,6 +449,7 @@ class TransformerEncoder(FairseqEncoder):
         num_layers = len(position_layers)
         # stores position attention probabilities for each layer L x B x T x P
         probability = torch.empty(num_layers, num_sentences, src_len, max_target_position)
+        print(probability.shape)
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 
@@ -460,8 +461,9 @@ class TransformerEncoder(FairseqEncoder):
         # encoder layers
         for idx, layer in enumerate(self.layers):
             if idx in position_layers:
-                x, pos_attention = self.position_attention(x, pos_table)
-                probability[idx] = pos_attention
+                x, pos_attention = self.position_attention(x, pos_table,1)
+                print(pos_attention.shape)
+                probability[position_layers.index(idx)] = pos_attention
             x = layer(x, encoder_padding_mask)
             if return_all_hiddens:
                 assert encoder_states is not None

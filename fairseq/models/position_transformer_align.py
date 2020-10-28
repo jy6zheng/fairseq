@@ -35,28 +35,26 @@ class PositionTransformerAlignModel(TransformerModel):
             transformer_model.encoder, transformer_model.decoder, args
         )
 
-    def forward(self, src_tokens, src_lengths, prev_output_tokens):
-        encoder_out, probability = self.forward_encoder(src_tokens, src_lengths)
+    def forward(self, src_tokens, src_lengths, max_target_position,  prev_output_tokens):
+        encoder_out, probability = self.forward_encoder(src_tokens, src_lengths, max_target_position)
         return self.decoder(prev_output_tokens, encoder_out), probability
 
-    def forward_encoder(self, src_tokens, src_lengths, **extra_args):
+    def forward_encoder(self, src_tokens, src_lengths, max_target_position, **extra_args):
         attn_args = {
             "position_layers": self.position_layers,
         }
-        encoder_out, probability = self.encoder(src_tokens, src_lengths, **attn_args, **extra_args)
+        encoder_out, probability = self.encoder(src_tokens, src_lengths, max_target_position, **attn_args, **extra_args)
         return encoder_out, probability
 
 
 @register_model_architecture("position_transformer_align", "position_transformer_align")
 def position_transformer_align(args):
-    args.alignment_heads = getattr(args, "alignment_heads", 1)
-    args.alignment_layer = getattr(args, "alignment_layer", 4)
+    args.position_layers = getattr(args, "position_layers", [0, 5])
     args.full_context_alignment = getattr(args, "full_context_alignment", False)
     base_architecture(args)
 
 
 @register_model_architecture("position_transformer_align", "position_transformer_wmt_en_de_big_align")
 def position_transformer_wmt_en_de_big_align(args):
-    args.alignment_heads = getattr(args, "alignment_heads", 1)
-    args.alignment_layer = getattr(args, "alignment_layer", 4)
+    args.position_layers = getattr(args, "position_layers", [0, 5])
     transformer_wmt_en_de_big(args)
