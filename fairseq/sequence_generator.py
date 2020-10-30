@@ -239,7 +239,7 @@ class SequenceGenerator(nn.Module):
         # placeholder of indices for bsz * beam_size to hold tokens and accumulative scores
         new_order = torch.arange(bsz).view(-1, 1).repeat(1, beam_size).view(-1)
         new_order = new_order.to(src_tokens.device).long()
-        encoder_outs = self.model.reorder_encoder_out(encoder_outs, new_order)
+        encoder_outs = self.model.reorder_encoder_out(encoder_outs[0], new_order)
         # ensure encoder_outs is a List.
         assert encoder_outs is not None
 

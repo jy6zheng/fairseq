@@ -174,6 +174,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
         parser.add_argument('--quant-noise-scalar', type=float, metavar='D', default=0,
                             help='scalar quantization noise and scalar quantization at training time')
         # fmt: on
+        parser.add_argument('--position-layers', nargs="+", type=int,
+                            help='List of layers where the position attention occurs, starting from 0')
 
     @classmethod
     def build_model(cls, args, task):
@@ -261,7 +263,6 @@ class TransformerModel(FairseqEncoderDecoderModel):
         features_only: bool = False,
         alignment_layer: Optional[int] = None,
         alignment_heads: Optional[int] = None,
-        position_layers: Optional[List[int]] = None,
     ):
         """
         Run the forward pass for an encoder-decoder model.
@@ -269,8 +270,8 @@ class TransformerModel(FairseqEncoderDecoderModel):
         Copied from the base class, but without ``**kwargs``,
         which are not supported by TorchScript.
         """
-        encoder_out = self.encoder(
-            src_tokens, src_lengths=src_lengths, max_target_position=max_target_position, position_layers=position_layers, return_all_hiddens=return_all_hiddens
+        encoder_out, probability = self.encoder(
+            src_tokens, src_lengths=src_lengths, max_target_position=max_target_position, return_all_hiddens=return_all_hiddens
         )
         decoder_out = self.decoder(
             prev_output_tokens,
@@ -281,7 +282,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
             src_lengths=src_lengths,
             return_all_hiddens=return_all_hiddens,
         )
-        return decoder_out
+        return decoder_out, probability
 
     # Since get_normalized_probs is in the Fairseq Model which is not scriptable,
     # I rewrite the get_normalized_probs from Base Class to call the
@@ -320,6 +321,7 @@ class TransformerEncoder(FairseqEncoder):
         embed_dim = embed_tokens.embedding_dim
         self.padding_idx = embed_tokens.padding_idx
         self.max_source_positions = args.max_source_positions
+        self.device_ = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # creating constant positional encoding table with the max source positions
         pe = torch.zeros(self.max_source_positions, embed_dim)
@@ -327,7 +329,10 @@ class TransformerEncoder(FairseqEncoder):
         div_term = torch.exp((torch.arange(0, embed_dim, 2, dtype=torch.float) * -(math.log(10000.0) / embed_dim)))
         pe[:, 0::2] = torch.sin(position.float() * div_term)
         pe[:, 1::2] = torch.cos(position.float() * div_term)
-        self.constant_positional_encoding = pe
+        self.constant_positional_encoding = pe.to(self.device_)
+
+        # position layers
+        self.position_layers = args.position_layers
 
         self.embed_tokens = embed_tokens
 
@@ -412,7 +417,6 @@ class TransformerEncoder(FairseqEncoder):
         src_tokens,
         src_lengths,
         max_target_position,
-        position_layers: Optional[List[int]] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
     ):
@@ -445,11 +449,10 @@ class TransformerEncoder(FairseqEncoder):
         # create position table of target positions (P x C ) where P stands for target positions
         pos_table = self.constant_positional_encoding[:max_target_position]
         # repeat position table for each of the sentences (B x P x C)
-        pos_table = pos_table.repeat(num_sentences, 1).view(num_sentences, max_target_position, -1)
-        num_layers = len(position_layers)
+        pos_table = pos_table.repeat(num_sentences, 1).view(num_sentences, max_target_position, -1).to(x)
+        num_layers = len(self.position_layers)
         # stores position attention probabilities for each layer L x B x T x P
-        probability = torch.empty(num_layers, num_sentences, src_len, max_target_position)
-        print(probability.shape)
+        probability = torch.empty(num_layers, num_sentences, src_len, max_target_position).to(x)
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 
@@ -460,10 +463,10 @@ class TransformerEncoder(FairseqEncoder):
 
         # encoder layers
         for idx, layer in enumerate(self.layers):
-            if idx in position_layers:
-                x, pos_attention = self.position_attention(x, pos_table,1)
-                print(pos_attention.shape)
-                probability[position_layers.index(idx)] = pos_attention
+            if idx in self.position_layers:
+                reordered_position, pos_attention = self.position_attention(x, pos_table,1)
+                probability[self.position_layers.index(idx)] = pos_attention
+                x = x + reordered_position
             x = layer(x, encoder_padding_mask)
             if return_all_hiddens:
                 assert encoder_states is not None
@@ -1019,6 +1022,7 @@ def base_architecture(args):
     args.no_scale_embedding = getattr(args, "no_scale_embedding", False)
     args.layernorm_embedding = getattr(args, "layernorm_embedding", False)
     args.tie_adaptive_weights = getattr(args, "tie_adaptive_weights", False)
+    args.position_layers = getattr(args, "position_layers", [0, 5])
 
 
 @register_model_architecture("transformer", "transformer_iwslt_de_en")
