@@ -163,7 +163,6 @@ def collate(
         for i, sample in enumerate(samples):
             constraints[i, 0: lens[i]] = samples[i].get("constraints")
         batch["constraints"] = constraints
-
     return batch
 
 

@@ -20,7 +20,7 @@ class LabelSmoothedCrossEntropyCriterionWithPosition(
         LabelSmoothedCrossEntropyCriterion.add_args(parser)
         parser.add_argument(
             "--alignment-lambda",
-            default=0.05,
+            default=0.3,
             type=float,
             metavar="D",
             help="weight for the alignment loss",
@@ -50,7 +50,7 @@ class LabelSmoothedCrossEntropyCriterionWithPosition(
         alignment_loss = None
 
         # Compute alignment loss only for training set and non dummy batches.
-        if "alignments" in sample and sample["alignments"] is not None:
+        if "alignments" in sample and sample["alignments"] is not None and probability is not None:
             alignment_loss = self.compute_alignment_loss(sample, net_output, probability)
 
         if alignment_loss is not None:

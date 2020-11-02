@@ -387,7 +387,7 @@ class TransformerEncoder(FairseqEncoder):
         if token_embedding is None:
             token_embedding = self.embed_tokens(src_tokens)
         x = embed = self.embed_scale * token_embedding
-        if self.embed_positions is not None:
+        if self.embed_positions is not None and self.position_layers is None:
             x = embed + self.embed_positions(src_tokens)
         if self.layernorm_embedding is not None:
             x = self.layernorm_embedding(x)
@@ -400,7 +400,9 @@ class TransformerEncoder(FairseqEncoder):
         # T x B x C -> B x T x C
         x = x.transpose(0, 1)
         dim = x.size(-1)
+        self.pos_weight = nn.Linear(dim, dim, bias=True).to(x)
         # pos_table : B x P x C -> B x C x P, scores: B x T (# words) x P (# positions)
+        x = self.pos_weight(x)
         scores = torch.matmul(x, pos_table.transpose(-2, -1)) / math.sqrt(dim)
         if sf_type == 1:
             pos_attention = F.softmax(scores, dim=-1)
@@ -450,9 +452,12 @@ class TransformerEncoder(FairseqEncoder):
         pos_table = self.constant_positional_encoding[:max_target_position]
         # repeat position table for each of the sentences (B x P x C)
         pos_table = pos_table.repeat(num_sentences, 1).view(num_sentences, max_target_position, -1).to(x)
-        num_layers = len(self.position_layers)
-        # stores position attention probabilities for each layer L x B x T x P
-        probability = torch.empty(num_layers, num_sentences, src_len, max_target_position).to(x)
+        if self.position_layers is not None:
+            num_layers = len(self.position_layers)
+            # stores position attention probabilities for each layer L x B x T x P
+            probability = torch.empty(num_layers, num_sentences, src_len, max_target_position).to(x)
+        else:
+            probability = None
         # B x T x C -> T x B x C
         x = x.transpose(0, 1)
 
@@ -463,7 +468,7 @@ class TransformerEncoder(FairseqEncoder):
 
         # encoder layers
         for idx, layer in enumerate(self.layers):
-            if idx in self.position_layers:
+            if self.position_layers is not None and idx in self.position_layers:
                 reordered_position, pos_attention = self.position_attention(x, pos_table,1)
                 probability[self.position_layers.index(idx)] = pos_attention
                 x = x + reordered_position
@@ -1022,7 +1027,7 @@ def base_architecture(args):
     args.no_scale_embedding = getattr(args, "no_scale_embedding", False)
     args.layernorm_embedding = getattr(args, "layernorm_embedding", False)
     args.tie_adaptive_weights = getattr(args, "tie_adaptive_weights", False)
-    args.position_layers = getattr(args, "position_layers", [0, 5])
+    args.position_layers = getattr(args, "position_layers", [0])
 
 
 @register_model_architecture("transformer", "transformer_iwslt_de_en")
