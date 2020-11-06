@@ -2,6 +2,8 @@ import math
 
 from fairseq import metrics, utils
 from fairseq.criterions import register_criterion
+import torch
+import torch.nn as nn
 
 from .label_smoothed_cross_entropy import LabelSmoothedCrossEntropyCriterion
 
@@ -20,7 +22,7 @@ class LabelSmoothedMSEWithPosition(
         LabelSmoothedCrossEntropyCriterion.add_args(parser)
         parser.add_argument(
             "--alignment-lambda",
-            default=0.05,
+            default=0.3,
             type=float,
             metavar="D",
             help="weight for the alignment loss",
@@ -55,7 +57,7 @@ class LabelSmoothedMSEWithPosition(
 
         if alignment_loss is not None:
             logging_output["alignment_loss"] = utils.item(alignment_loss.data)
-            loss += self.alignment_lambda * alignment_loss
+            loss = loss * (1- self.alignment_lambda) +  self.alignment_lambda * alignment_loss
 
         return loss, sample_size, logging_output
 
@@ -68,10 +70,23 @@ class LabelSmoothedMSEWithPosition(
             prob = layer.reshape(bsz * tgt_sz, src_sz)
             align = sample["alignments"]
             if len(align) > 0:
-                loss = (
-                    ((prob[align[:, 1][:, None], align[:, 0][:, None]] - 1)**2)
-                ).sum()*(1/len(align))
+                mse = nn.MSELoss()
+                align_prob = prob[align[:, 1][:, None], align[:, 0][:, None]]
+                target = torch.ones(len(align), 1).to(prob)
+                loss = mse(align_prob, target) 
                 total_loss += loss
+                if 2718592 in sample["id"]:
+                    idx = ((sample["id"] == 2718592).nonzero())
+                    print("idx", idx)
+                    print("src_tokens", sample["net_input"]["src_tokens"][idx])
+                    print("src_length", sample["net_input"]["src_lengths"][idx])
+                    max_target_length = sample["net_input"]["max_target_position"]
+                    align_idx = (idx + 1) * max_target_length
+                    example_align = sample["alignments"][:max_target_length]
+                    print("alignments", example_align)
+                    prob_align = prob[example_align[:, 1][:, None], example_align[:, 0][:, None]]
+                    print("probabilities", prob_align)
+                    print("loss", total_loss.data)
             else:
                 return None
         return total_loss
@@ -98,10 +113,7 @@ class LabelSmoothedMSEWithPosition(
             "nll_loss", nll_loss_sum / ntokens / math.log(2), ntokens, round=3
         )
         metrics.log_scalar(
-            "alignment_loss",
-            alignment_loss_sum / sample_size / math.log(2),
-            sample_size,
-            round=3,
+            "alignment_loss", alignment_loss_sum / math.log(2), sample_size, round=3,
         )
         metrics.log_derived(
             "ppl", lambda meters: utils.get_perplexity(meters["nll_loss"].avg)

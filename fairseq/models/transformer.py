@@ -376,6 +376,7 @@ class TransformerEncoder(FairseqEncoder):
             self.layer_norm = LayerNorm(embed_dim)
         else:
             self.layer_norm = None
+        self.pos_weight = nn.Linear(embed_dim, embed_dim, bias=True).to(self.device_)
 
     def build_encoder_layer(self, args):
         return TransformerEncoderLayer(args)
@@ -400,18 +401,35 @@ class TransformerEncoder(FairseqEncoder):
         # T x B x C -> B x T x C
         x = x.transpose(0, 1)
         dim = x.size(-1)
-        self.pos_weight = nn.Linear(dim, dim, bias=True).to(x)
         # pos_table : B x P x C -> B x C x P, scores: B x T (# words) x P (# positions)
         x = self.pos_weight(x)
         scores = torch.matmul(x, pos_table.transpose(-2, -1)) / math.sqrt(dim)
         if sf_type == 1:
             pos_attention = F.softmax(scores, dim=-1)
         else:
-            pos_attention = F.gumbel_softmax(scores, dim=-1)
+            pos_attention = F.gumbel_softmax(scores, tau=0.5, dim=-1)
         # [B x T (words) x P (positions)] x [B x P(positions) x C] -> B x T x C
         reordered_pos = torch.matmul(pos_attention, pos_table)
         # B x T x C -> T x B x C
         reordered_pos = reordered_pos.transpose(0, 1)
+        return reordered_pos, pos_attention
+
+    def p_position_attention(self, x, pos_table, sf_type):
+        dim = x.size(-1)
+        x_pos = self.constant_positional_encoding[:x.size(0)]
+        # x_pos B x T x C
+        x_pos = x_pos.repeat(x.size(1), 1).view(x.size(1), x.size(0), -1).to(x)
+        # x_pos B x T x C multiplied with weight C x C
+        x_pos_weight = self.pos_weight(x_pos)
+        # B x T x C x_pos multiplied with B x C x P pos_table: scores B x T x P
+        scores = torch.matmul(x_pos_weight, pos_table.transpose(-2, -1)) /math.sqrt(dim)
+        if sf_type == 1:
+            pos_attention = F.softmax(scores, dim=-1)
+        else:
+            pos_attention = F.gumbel_softmax(scores, dim=-1)
+        # B x T x P with B x P x C becomes B x T x C
+        reordered_pos = torch.matmul(pos_attention, pos_table)
+        reordered_pos = reordered_pos.transpose(0,1)
         return reordered_pos, pos_attention
 
     def forward(
@@ -469,7 +487,7 @@ class TransformerEncoder(FairseqEncoder):
         # encoder layers
         for idx, layer in enumerate(self.layers):
             if self.position_layers is not None and idx in self.position_layers:
-                reordered_position, pos_attention = self.position_attention(x, pos_table,1)
+                reordered_position, pos_attention = self.position_attention(x, pos_table,2)
                 probability[self.position_layers.index(idx)] = pos_attention
                 x = x + reordered_position
             x = layer(x, encoder_padding_mask)
